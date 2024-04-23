@@ -2,6 +2,8 @@ import threading
 import queue
 import cv2 # OpenCV for image processing
 from mpi4py import MPI # MPI for distributed computing
+
+
 class WorkerThread(threading.Thread):
     def __init__(self, task_queue):
         threading.Thread.__init__(self)
