@@ -57,5 +57,3 @@ def create_vm(project, instance_name):
     request = compute.insert(project=project, zone=zone, body=instance)
     response = request.execute()
     print(response)
-
-create_vm("your-project-id", "your-instance-name")
