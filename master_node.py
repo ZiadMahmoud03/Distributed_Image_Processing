@@ -1,88 +1,78 @@
-from mpi4py import MPI
-import queue
-from google.cloud import pubsub_v1
-import json
+import threading
+import time
+import requests  # For communicating with the GUI
+from azure.storage.queue import QueueServiceClient, QueueClient
+from azure.storage.blob import BlobServiceClient
+from mpi4py import MPI 
+import time
+import uuid
+# ...  Add any other imports if needed
 
-# Function to distribute tasks to worker threads
-def distribute_tasks(task_queue, image_list, operation_list):
-    num_workers = MPI.COMM_WORLD.Get_size() - 1
+# Azure Queue Setup (Both queues)
+connect_str = "YOUR_AZURE_STORAGE_CONNECTION_STRING"
+queue_name = "imagetasks" 
+processed_images_queue_name = "processedimages"
 
-    for i, (image, operation) in enumerate(zip(image_list, operation_list)):
-        worker_rank = (i % num_workers) + 1
-        task_queue.put((image, operation), worker_rank)
+queue_service_client = QueueServiceClient.from_connection_string(conn_str=connect_str)
+task_queue = queue_service_client.get_queue_client(queue_name)
+processed_images_queue = queue_service_client.get_queue_client(processed_images_queue_name)
 
-    # Send termination signals to worker threads
-    for _ in range(num_workers):
-        task_queue.put(None)
+# Azure Blob Storage Setup
+blob_service_client = BlobServiceClient.from_connection_string(connect_str)
+temp_container_name = "temp-images"  # For worker uploads
 
-# Function to collect results from worker threads
-def collect_results(task_queue, num_tasks):
-    results = []
-    for _ in range(num_tasks):
-        result = MPI.COMM_WORLD.recv(source=MPI.ANY_SOURCE)
-        results.append(result)
-    return results
+# MPI Setup
+comm = MPI.COMM_WORLD
+rank = comm.Get_rank()
 
-def callback(message):
-    data = json.loads(message.data.decode("utf-8"))
-    image = data["image"]
-    operation = data["operation"]
-    task_queue.put((image, operation))
-    message.ack()
+# Task Tracking (you'll need a suitable mechanism)
+task_queue = {}  # Example: {task_id: (image_path, operation)}
 
-if __name__ == "__main__":
-    comm = MPI.COMM_WORLD
-    rank = comm.Get_rank()
+def generate_task_id():
+    timestamp = int(time.time() * 1000)
+    uuid_part = str(uuid.uuid4())[:8]  # Take a few characters from the UUID
+    return f"task_{timestamp}_{uuid_part}"
 
-    if rank == 0:  # Master node
-        # Sample image and operation lists
-        image_list = ['image1.jpg', 'image2.jpg', 'image3.jpg']
-        operation_list = ['edge_detection', 'color_inversion', 'edge_detection']
-        
-        # Create a queue for tasks
-        task_queue = queue.Queue()
+def process_image_request(image_file, operation):  
+    # Create a unique task ID
+    task_id = generate_task_id() 
 
-        # Distribute tasks to worker threads
-        distribute_tasks(task_queue, image_list, operation_list)
+    # Enqueue task
+    task_queue.send_message(f"{image_file.filename},{operation}")
+    task_queue[task_id] = (image_file.filename, operation)
 
-        # Create a Pub/Sub subscriber client
-        subscriber = pubsub_v1.SubscriberClient()
+    return task_id
 
-        # Define subscription path
-        subscription_path = subscriber.subscription_path(
-            "<your-project-id>", "<your-subscription-id>"
-        )
+def receive_results():
+    while True:
+        result = comm.recv(source=MPI.ANY_SOURCE) 
+        task_id = result['task_id']  # Assuming the result includes this
 
-        # Subscribe to the Pub/Sub topic
-        subscriber.subscribe(subscription_path, callback=callback)
+        # Update GUI with 'complete' status for task_id
+        send_status_update_to_gui(task_id, status='complete')
 
-        # Collect results from worker threads
-        results = collect_results(task_queue, len(image_list))
-        
-        # Process results as needed
-        for result in results:
-            # Do something with the results
-            pass
+        # Optionally store processed image in Azure Blob Storage
+        # ...
 
-    else:  # Worker nodes
-        # Create a Pub/Sub publisher client
-        publisher = pubsub_v1.PublisherClient()
+def send_status_update_to_gui(task_id, status):
+    # Implementation depends on how your GUI receives updates
+    pass
 
-        # Define topic path
-        topic_path = publisher.topic_path(
-            "<your-project-id>", "<your-topic-id>"
-        )
+# ... (Rest of your code, including polling functions for GUI communication)
 
-        # Publish task messages to Pub/Sub topic
-        for image, operation in zip(image_list, operation_list):
-            data = {"image": image, "operation": operation}
-            data = json.dumps(data).encode("utf-8")
-            future = publisher.publish(topic_path, data)
+if rank == 0: 
+    # Connect to Azure Queue 
+    queue_service_client = QueueServiceClient.from_connection_string(conn_str=connect_str)
+    task_queue = queue_service_client.get_queue_client(queue_name)
 
-        # Run worker thread
-        while True:
-            task = comm.recv(source=0)
-            if task is None:
-                break
-            image, operation = task
-            # Process the task (this should be similar to what the worker thread does)
+    # Start a thread to receive results
+    results_thread = threading.Thread(target=receive_results)
+    results_thread.start()
+
+    # ... Logic for your GUI communication (status checking, etc.)
+
+    # Signal the workers to stop (send 'None' tasks)
+    for _ in range(MPI.COMM_WORLD.Get_size() - 1):
+        task_queue.send_message('None')
+
+    results_thread.join()  
