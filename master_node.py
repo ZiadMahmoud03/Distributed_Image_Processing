@@ -36,11 +36,12 @@ def generate_task_id():
 
 def process_image_request(image_file, operation):
     task_id = generate_task_id()
-    task_queue[task_id] = (image_file, operation)  # Track the task
+    task_data = (image_file, operation)
+    task_queue[task_id] = task_data
 
-    # Distribute to an available worker
+    # Distribute the task to workers
     for i in range(1, size):
-        comm.send((task_id, image_file.filename, operation), dest=i)  
+        comm.send(('process', task_id, task_data), dest=i)
     return task_id
 
 def receive_results():
@@ -54,22 +55,17 @@ def receive_results():
             break
 
  
-def send_status_update_to_gui(task_id, status, image_path, result=None):  # Include image_path
+def send_status_update_to_gui(task_id, status, image_path, result=None):
     print(f"Image processing complete: {image_path}")
 
 if rank == 0:
-    # Start a thread to receive results
     results_thread = threading.Thread(target=receive_results)
     results_thread.start()
 
-    # ... Logic for your GUI communication (status checking, etc.)
-
-    # Signal the workers to stop after processing all tasks
     for _ in range(1, size):
-        comm.send(('done', None, None), dest=i)  # Send 'done' message
+        comm.send(('done', None, None), dest=_)
     results_thread.join()
-
-# Worker Nodes (Code running on each VM)
-if rank != 0:
+else:
     worker = wt.WorkerThread()
     worker.start()
+    worker.join()
