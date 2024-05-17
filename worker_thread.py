@@ -4,10 +4,9 @@ import numpy as np
 from mpi4py import MPI
 
 class WorkerThread(threading.Thread):
-    def __init__(self, result_queue):
-        threading.Thread.__init__(self)
-        self.result_queue = result_queue
-        self.comm = MPI.COMM_WORLD   # Initialize comm here, as an instance variable
+    def __init__(self):
+        super().__init__()
+        self.comm = MPI.COMM_WORLD
         self.rank = self.comm.Get_rank()
 
     def run(self):
@@ -16,37 +15,31 @@ class WorkerThread(threading.Thread):
                 status, task_id, task_data = self.comm.recv(source=0, tag=MPI.ANY_TAG)
             except Exception as e:
                 print(f"Worker {self.rank}: Error receiving task: {e}")
-                # Log the error for further analysis
-                # Potentially re-attempt communication with the master
-                continue 
+                continue
 
             if status == 'done':
                 print(f"Worker {self.rank} finished.")
                 break
 
             image_path, operation = task_data
-
             try:
                 result = self.process_image(image_path, operation)
                 self.comm.send(('complete', task_id, result), dest=0)
             except Exception as e:
                 print(f"Worker {self.rank}: Error processing or sending result for task {task_id}: {e}")
-                self.comm.send(('failed', task_id, str(e)), dest=0)  # Send error details to master
-                
-        # Close MPI communication (optional)
+                self.comm.send(('failed', task_id, str(e)), dest=0)
+
         self.comm.Disconnect()
+        MPI.Finalize()
 
-    def process_image(self, image, operation):
-        # Load the image
-        img = cv2.imread(image, cv2.IMREAD_COLOR)
-
-        # Perform the specified operation
+    def process_image(self, image_path, operation):
+        img = cv2.imread(image_path, cv2.IMREAD_COLOR)
         if operation == 'edge_detection':
             result = cv2.Canny(img, 100, 200)
         elif operation == 'color_inversion':
             result = cv2.bitwise_not(img)
         elif operation == 'gaussian_blur':
-            result = cv2.GaussianBlur(img, (5, 5), 0)  # Kernel size (5, 5) is common
+            result = cv2.GaussianBlur(img, (5, 5), 0)
         elif operation == 'sharpen':
             kernel = np.array([[-1,-1,-1], [-1,9,-1], [-1,-1,-1]])
             result = cv2.filter2D(img, -1, kernel)
@@ -57,15 +50,8 @@ class WorkerThread(threading.Thread):
         else:
             result = "Invalid operation"
         return result
-    
-    def receive_results():
-        while True:
-            status, task_id, result = comm.recv(source=MPI.ANY_SOURCE) 
-            if status == 'complete':
-                # Handle successful image processing (e.g., update GUI)
-                send_status_update_to_gui(task_id, status='complete', result=result)
-            elif status == 'failed':
-                # Handle the case where the image processing failed
-                print(f"Image processing for task {task_id} failed")
 
-
+if __name__ == "__main__":
+    worker = WorkerThread()
+    worker.start()
+    worker.join()
