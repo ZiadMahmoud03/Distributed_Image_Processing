@@ -1,11 +1,14 @@
 import tkinter as tk
-from tkinter import ttk, filedialog
-from PIL import Image, ImageTk  
+from tkinter import ttk, filedialog, messagebox
+from PIL import Image, ImageTk
 import time
 import requests
+import threading
 import master_node as master
 
-
+image_path = None
+task_id = None
+progress_label = None
 
 def process_image(image_path, operation):
     print(f"Processing image: {image_path} with operation: {operation}")
@@ -34,46 +37,27 @@ def start_processing():
 
 
 def send_processing_request():
-    global task_id, image_path  # Access global task_id and image_path
-
-    # Make sure an image is loaded before proceeding
-    if image_path is None:
-        tk.messagebox.showerror("Error", "Please select an image first.")
+    global task_id, image_path
+    if not image_path:
+        messagebox.showerror("Error", "Please select an image first.")
         return
-
     operation = operation_variable.get()
-
-    task_id = master.process_image_request(image_path, operation)
-    print(f"Task added with ID: {task_id}")
-
-    # You can directly call the load_image function from the master node after processing is complete
-    master.send_status_update_to_gui(task_id, status='complete', result=master.process_image(image_path, operation)) 
-
-
+    try:
+        task_id = master.process_image_request(image_path, operation)
+        progress_label.config(text="Processing...")
+        threading.Thread(target=monitor_progress, args=(task_id,)).start()
+    except requests.exceptions.RequestException as e:
+        messagebox.showerror("Error", f"Failed to communicate with the master node: {e}")
 
 
-# def send_processing_request():
-#     image_path = image_label.image.filename
-#     operation = operation_variable.get()
-
-#     api_url = 'http://master_node_ip/process_image' 
-
-#     try:
-#         files = {'image': open(image_path, 'rb')}
-#         data = {'operation': operation}
-#         response = requests.post(api_url, files=files, data=data)
-
-#         if response.status_code == 200:
-#             print("Processing successful!")
-#             result = response.json()  #
-#             tk.messagebox.showinfo("Result", result) 
-#         else:
-#             print("An error occurred.")
-#             tk.messagebox.showerror("Error", "Processing failed.")
-
-#     except requests.exceptions.RequestException as e:
-#         print(f"Communication error: {e}")
-#         tk.messagebox.showerror("Error", "Connection to server failed.")
+def monitor_progress(task_id):
+    while True:
+        result = master.get_result(task_id) 
+        if result is not None:  # Check if result is available
+            load_image(result)  # Update the image_label with the result
+            progress_label.config(text="Processing complete!")  # Update the progress label
+            break
+        time.sleep(1) 
 
 
 # Main window setup
