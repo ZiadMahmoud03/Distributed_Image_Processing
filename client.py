@@ -31,7 +31,7 @@ def upload():
 @app.route('/status/<task_id>', methods=['GET'])
 def status(task_id):
     try:
-        response = requests.get(f"{master_url}/status/{task_id}")
+        response = requests.get(f"{master_url}/result/{task_id}")
         response_data = response.json()
         return jsonify(response_data)
     except Exception as e:
