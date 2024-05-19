@@ -4,14 +4,61 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
     <title>Image Processor Client</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+        }
+        .container {
+            max-width: 600px;
+            margin: 50px auto;
+            padding: 20px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+        }
+        h1 {
+            text-align: center;
+        }
+        form {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+        }
+        input[type="file"] {
+            margin-bottom: 10px;
+        }
+        select {
+            margin-bottom: 10px;
+        }
+        button[type="submit"] {
+            padding: 10px 20px;
+            background-color: #007bff;
+            color: #fff;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        #status, #result {
+            text-align: center;
+            margin-top: 20px;
+            display: none;
+        }
+        #result img {
+            max-width: 100%;
+            margin-top: 10px;
+        }
+    </style>
 </head>
 <body>
     <div class="container">
         <h1>Image Processor</h1>
         <form id="uploadForm">
             <div>
-                <label for="image">Upload Image:</label>
-                <input type="file" id="image" name="image" accept="image/*" required>
+                <label for="image">Upload Image(s):</label>
+                <input type="file" id="image" name="image" accept="image/*" multiple required>
             </div>
             <div>
                 <label for="operation">Select Operation:</label>
@@ -26,20 +73,21 @@
             </div>
             <button type="submit">Upload</button>
         </form>
-        <div id="status" style="display:none;">Processing image...</div>
-        <div id="result" style="display:none;">
+        <div id="status">Processing image...</div>
+        <div id="result">
+            <h2>Uploaded Image</h2>
+            <img id="uploadedImage" src="" alt="Uploaded Image">
             <h2>Processed Image</h2>
-            <img id="resultImage" src="" style="max-width: 100%;">
+            <img id="resultImage" src="" alt="Processed Image">
             <button onclick="resetForm()">Upload Another Image</button>
         </div>
     </div>
-
     <script>
         document.getElementById('uploadForm').addEventListener('submit', function(event) {
             event.preventDefault();
             const formData = new FormData(this);
             document.getElementById('status').style.display = 'block';
-
+    
             fetch('/upload', {
                 method: 'POST',
                 body: formData
@@ -49,13 +97,17 @@
                 document.getElementById('status').style.display = 'none';
                 if (data.task_id) {
                     checkStatus(data.task_id);
+                    const uploadedFile = document.getElementById('image').files[0];
+                    const uploadedImageUrl = URL.createObjectURL(uploadedFile);
+                    console.log("Uploaded Image URL:", uploadedImageUrl);
+                    document.getElementById('uploadedImage').src = uploadedImageUrl;
                 } else {
                     alert('Error: ' + data.error);
                 }
             })
             .catch(error => console.error('Error:', error));
         });
-
+    
         function checkStatus(taskId) {
             fetch('/status/' + taskId)
             .then(response => response.json())
@@ -71,12 +123,15 @@
             })
             .catch(error => console.error('Error:', error));
         }
-
+    
         function resetForm() {
             document.getElementById('uploadForm').reset();
             document.getElementById('status').style.display = 'none';
             document.getElementById('result').style.display = 'none';
+            document.getElementById('uploadedImage').src = '';
+            document.getElementById('resultImage').src = '';
         }
     </script>
+       
 </body>
 </html>
