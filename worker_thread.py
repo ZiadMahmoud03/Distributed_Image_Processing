@@ -4,18 +4,16 @@ import cv2
 import numpy as np
 import json
 import logging
-import requests
 from flask import Flask, request, jsonify
+import os
 
 app = Flask(__name__)
-
-# Configure logging
 logging.basicConfig(level=logging.DEBUG)
 
-# Azure configurations
-connection_string = "DefaultEndpointsProtocol=https;AccountName=dipqueue;AccountKey=QGNnCM1lAEqqS0G5k5vhkDo5x1eXxrrZhipISXxtFOnQy2zouzEjdL2I8uG7uUc/eVYI7weKYOBj+AStCp8Vow==;EndpointSuffix=core.windows.net"
+connection_string = os.getenv("AZURE_STORAGE_CONNECTION_STRING", "DefaultEndpointsProtocol=https;AccountName=dipqueue;AccountKey=QGNnCM1lAEqqS0G5k5vhkDo5x1eXxrrZhipISXxtFOnQy2zouzEjdL2I8uG7uUc/eVYI7weKYOBj+AStCp8Vow==;EndpointSuffix=core.windows.net")
 blob_service_client = BlobServiceClient.from_connection_string(connection_string)
 task_queue_client = QueueClient.from_connection_string(connection_string, "task-queue", message_decode_policy=TextBase64DecodePolicy())
+processed_queue_client = QueueClient.from_connection_string(connection_string, "processed-image-queue", message_encode_policy=TextBase64EncodePolicy())
 container_name = "blob-storage"
 
 def process_image(image_data, operation):
@@ -38,54 +36,36 @@ def process_image(image_data, operation):
     return result
 
 @app.route('/process', methods=['POST'])
-def process():
-    task_info = request.json
-    task_id = task_info["task_id"]
-    blob_name = task_info["blob_name"]
-    operation = task_info["operation"]
+def process_task():
+    task_info = request.get_json()
+    task_id = task_info['task_id']
+    blob_name = task_info['blob_name']
+    operation = task_info['operation']
 
-    logging.debug(f"Received task: {task_info}")
-
-    blob_client = blob_service_client.get_blob_client(container=container_name, blob=blob_name)
-    image_data = blob_client.download_blob().readall()
-    logging.debug(f"Downloaded image from blob storage: {blob_name}")
-
-    result = process_image(image_data, operation)
-    if result is None:
-        return jsonify({"error": "Invalid operation"}), 400
-
-    _, buffer = cv2.imencode('.png', result)
-    result_blob_name = f"processed_{task_id}.png"
-    result_blob_client = blob_service_client.get_blob_client(container=container_name, blob=result_blob_name)
-    result_blob_client.upload_blob(buffer.tobytes(), overwrite=True)
-    logging.debug(f"Uploaded processed image to blob storage: {result_blob_name}")
-
-    finished_message = {"task_id": task_id, "processed_blob_name": result_blob_name}
-    master_node_url = "http://98.71.41.4:8000/status_update"  # Update with actual master node IP
     try:
-        response = requests.post(master_node_url, json=finished_message)
-        response.raise_for_status()
-    except requests.exceptions.RequestException as e:
-        logging.error(f"Failed to notify master node: {e}")
-        return jsonify({"error": "Failed to notify master node"}), 500
+        blob_client = blob_service_client.get_blob_client(container=container_name, blob=blob_name)
+        blob_data = blob_client.download_blob().readall()
+        logging.debug(f"Downloaded image data for blob: {blob_name}")
 
-    return jsonify({"status": "complete"})
+        processed_image = process_image(blob_data, operation)
+        if processed_image is None:
+            logging.error(f"Invalid operation: {operation}")
+            return jsonify({"error": "Invalid operation"}), 400
+
+        _, buffer = cv2.imencode('.png', processed_image)
+        result_blob_name = f"{task_id}_processed.png"
+        result_blob_client = blob_service_client.get_blob_client(container=container_name, blob=result_blob_name)
+        result_blob_client.upload_blob(buffer.tobytes(), overwrite=True)
+        logging.info(f"Processed image uploaded to blob storage: {result_blob_name}")
+
+        processed_info = {"task_id": task_id, "result_blob_name": result_blob_name}
+        processed_queue_client.send_message(json.dumps(processed_info))
+        logging.info(f"Processed task {task_id} added to processed queue")
+    except Exception as e:
+        logging.error(f"Error processing task {task_id}: {e}")
+        return jsonify({"error": f"Error processing task {task_id}: {e}"}), 500
+
+    return jsonify({"status": "complete"}), 200
 
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=7000)
-
-def poll_task_queue():
-    while True:
-        messages = task_queue_client.receive_messages()
-        for msg in messages:
-            task_info = json.loads(msg.content)
-            task_queue_client.delete_message(msg)
-            response = requests.post('http://localhost:7000/process', json=task_info)
-            if response.status_code != 200:
-                logging.error(f"Failed to process task: {task_info}")
-        time.sleep(5)
-
-if __name__ == '__main__':
-    import threading
-    threading.Thread(target=poll_task_queue, daemon=True).start()
     app.run(debug=True, host='0.0.0.0', port=7000)
