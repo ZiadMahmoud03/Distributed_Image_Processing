@@ -1,7 +1,7 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_file
 import requests
 import uuid
-from azure.storage.blob import BlobServiceClient, generate_blob_sas, BlobSasPermissions
+from azure.storage.blob import BlobServiceClient, BlobSasPermissions, generate_blob_sas
 from azure.storage.queue import QueueClient, TextBase64EncodePolicy
 from datetime import datetime, timedelta
 import os
@@ -21,9 +21,9 @@ container_name = "blob-storage"
 
 # List of worker endpoints
 worker_endpoints = [
-    "http://10.0.0.7:7000",
-    "http://10.0.0.6:7000",
-    "http://10.0.0.5:7000"
+    "http://10.0.0.7:8000",
+    "http://10.0.0.6:8000",
+    "http://10.0.0.5:8000"
 ]
 worker_index = 0
 worker_lock = threading.Lock()
@@ -96,8 +96,16 @@ def get_result(task_id):
             if message_data['task_id'] == task_id:
                 # Delete the message from the queue
                 processed_queue_client.delete_message(message)
-                result_blob_url = generate_sas_token(message_data['result_blob_name'])
-                return jsonify({"task_id": task_id, "result_blob_url": result_blob_url})
+                result_blob_name = message_data['result_blob_name']
+                # Download the modified image from Azure Blob Storage
+                blob_client = blob_service_client.get_blob_client(container=container_name, blob=result_blob_name)
+                downloaded_image_path = f"/path/to/downloaded/{result_blob_name}"
+                with open(downloaded_image_path, "wb") as downloaded_image:
+                    blob_data = blob_client.download_blob().readall()
+                    downloaded_image.write(blob_data)
+                logging.info(f"Downloaded modified image: {result_blob_name}")
+                # Return the downloaded image to the client
+                return send_file(downloaded_image_path, as_attachment=True)
         
         logging.info(f"No matching messages found in the processed queue for task {task_id}")
     except Exception as e:
