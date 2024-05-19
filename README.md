@@ -21,12 +21,6 @@ Distributed Image Processing System using Cloud Computing
 </details>
 
 
-###### Built With
-
-[![Python][python-shield]][python-url]
-[![OpenCV][opencv-shield]][opencv-url]
-[![Numpy][numpy-shield]][numpy-url]
-<!-- [![Pandas][pandas-shield]][pandas-url] -->
 
 ## System Architecture
 The system consists of the following components:
