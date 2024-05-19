@@ -1,71 +1,71 @@
-import threading
-import time
-import requests  # For communicating with the GUI
-from azure.storage.queue import QueueServiceClient, QueueClient
-from azure.storage.blob import BlobServiceClient
-from mpi4py import MPI 
-import time
+from flask import Flask, request, jsonify
+import requests
 import uuid
-import worker_thread as wt
+from azure.storage.blob import BlobServiceClient, generate_blob_sas, BlobSasPermissions
+from azure.storage.queue import QueueClient, TextBase64EncodePolicy
+from datetime import datetime, timedelta
+import os
+import json
+import logging
 
+app = Flask(__name__)
 
-# Azure Queue Setup (Both queues)
-connect_str = "DefaultEndpointsProtocol=https;AccountName=dipqueue;AccountKey=QGNnCM1lAEqqS0G5k5vhkDo5x1eXxrrZhipISXxtFOnQy2zouzEjdL2I8uG7uUc/eVYI7weKYOBj+AStCp8Vow==;EndpointSuffix=core.windows.net"
-queue_name = "task_queue" 
-processed_images_queue_name = "processed-image-queue"  
+# Configure logging
+logging.basicConfig(level=logging.DEBUG)
 
-queue_service_client = QueueServiceClient.from_connection_string(conn_str=connect_str)
-task_queue = queue_service_client.get_queue_client(queue_name)
-processed_images_queue = queue_service_client.get_queue_client(processed_images_queue_name)
+connection_string = "DefaultEndpointsProtocol=https;AccountName=dipqueue;AccountKey=QGNnCM1lAEqqS0G5k5vhkDo5x1eXxrrZhipISXxtFOnQy2zouzEjdL2I8uG7uUc/eVYI7weKYOBj+AStCp8Vow==;EndpointSuffix=core.windows.net"
+blob_service_client = BlobServiceClient.from_connection_string(connection_string)
+task_queue_client = QueueClient.from_connection_string(connection_string, "task-queue", message_encode_policy=TextBase64EncodePolicy())
+processed_queue_client = QueueClient.from_connection_string(connection_string, "processed-image-queue", message_encode_policy=TextBase64EncodePolicy())
+container_name = "blob-storage"
 
-# Azure Blob Storage Setup
-blob_service_client = BlobServiceClient.from_connection_string(connect_str)
-temp_container_name = "blob-storage"  # For worker uploads
+def generate_sas_token(blob_name):
+    sas_token = generate_blob_sas(
+        account_name=blob_service_client.account_name,
+        container_name=container_name,
+        blob_name=blob_name,
+        permission=BlobSasPermissions(read=True),
+        expiry=datetime.utcnow() + timedelta(hours=1)
+    )
+    return f"https://{blob_service_client.account_name}.blob.core.windows.net/{container_name}/{blob_name}?{sas_token}"
 
-# MPI Setup (Initialization moved to the master node)
-comm = MPI.COMM_WORLD
-rank = comm.Get_rank()
-size = comm.Get_size()
+@app.route('/process', methods=['POST'])
+def process():
+    file = request.files['image']
+    operation = request.form.get('operation')
 
-# Task Tracking & Synchronization
-task_lock = threading.Lock()
-task_queue = {}  # Example: {task_id: (image_path, operation)}
+    if not file or not operation:
+        return jsonify({"error": "Missing image or operation"}), 400
 
-def generate_task_id():
-    return int(time.time() * 1000)
+    task_id = str(uuid.uuid4())
+    blob_name = f"{task_id}.png"
+    blob_client = blob_service_client.get_blob_client(container=container_name, blob=blob_name)
+    blob_client.upload_blob(file.read(), overwrite=True)
 
-def process_image_request(image_file, operation):
-    task_id = generate_task_id()
-    task_data = (image_file, operation)
-    task_queue[task_id] = task_data
+    task_info = {"task_id": task_id, "blob_name": blob_name, "operation": operation}
+    
+    task_queue_client.send_message(json.dumps(task_info))
+    logging.info(f"Sent task {task_id} to task queue")
 
-    # Distribute the task to workers
-    for i in range(1, size):
-        comm.send(('process', task_id, task_data), dest=i)
-    return task_id
+    return jsonify({"task_id": task_id})
 
-def receive_results():
-    while True:
-        status, task_id, result = comm.recv(source=MPI.ANY_SOURCE, tag=MPI.ANY_TAG) 
-        if status == 'complete':
-            print(f"Received result for task {task_id}: {result}")
-        elif status == 'failed':
-            print(f"Task {task_id} failed on worker.")
-        elif status == 'done':  # Worker finished all tasks
-            break
+@app.route('/status/<task_id>', methods=['GET'])
+def status(task_id):
+    messages = processed_queue_client.receive_messages()
+    for msg in messages:
+        message = json.loads(msg.content)
+        if message["task_id"] == task_id:
+            processed_queue_client.delete_message(msg)
+            sas_url = generate_sas_token(message["processed_blob_name"])
+            return jsonify({"status": "complete", "result_blob_url": sas_url})
+    return jsonify({"status": "processing"})
 
- 
-def send_status_update_to_gui(task_id, status, image_path, result=None):
-    print(f"Image processing complete: {image_path}")
+@app.route('/status_update', methods=['POST'])
+def status_update():
+    data = request.json
+    processed_queue_client.send_message(json.dumps(data))
+    logging.info(f"Received status update: {data}")
+    return jsonify({"status": "acknowledged"})
 
-if rank == 0:
-    results_thread = threading.Thread(target=receive_results)
-    results_thread.start()
-
-    for _ in range(1, size):
-        comm.send(('done', None, None), dest=_)
-    results_thread.join()
-else:
-    worker = wt.WorkerThread()
-    worker.start()
-    worker.join()
+if __name__ == '__main__':
+    app.run(debug=True, host='0.0.0.0', port=8000)
