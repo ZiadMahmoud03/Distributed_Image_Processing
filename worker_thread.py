@@ -6,7 +6,6 @@ import json
 import logging
 from flask import Flask, request, jsonify
 import os
-import requests
 
 app = Flask(__name__)
 logging.basicConfig(level=logging.DEBUG)
@@ -70,7 +69,6 @@ def process_task():
             processed_info = {"task_id": task_id, "result_blob_name": result_blob_name}
             processed_queue_client.send_message(json.dumps(processed_info))
             logging.info(f"Processed task {task_id} added to processed queue")
-            # Send the URL of the processed image to the client
             return jsonify({"result_blob_url": f"https://{blob_service_client.account_name}.blob.core.windows.net/{container_name}/{result_blob_name}"}), 200
         else:
             return jsonify({"error": "Failed to upload processed image to blob storage"}), 500
