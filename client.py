@@ -1,5 +1,6 @@
-from flask import Flask, request, jsonify, render_template
+from flask import Flask, request, jsonify, render_template, send_file
 import requests
+import os
 
 app = Flask(__name__)
 master_url = "http://98.71.41.4:8000"
@@ -33,7 +34,14 @@ def status(task_id):
     try:
         response = requests.get(f"{master_url}/result/{task_id}")
         response_data = response.json()
-        return jsonify(response_data)
+        if response_data.get('result_blob_url'):
+            # If the processed image URL is available, initiate the download
+            download_url = response_data['result_blob_url']
+            return send_file(download_url, as_attachment=True)
+        elif response_data['status'] == 'not ready':
+            return jsonify({"status": "not ready"}), 200
+        else:
+            return jsonify({"error": response_data['error']}), 500
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
