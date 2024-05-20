@@ -42,7 +42,6 @@ The system consists of the following components:
   <li>Brightness adjustment</li>
 </ul>
 
-<p align="right">(<a href="#top">back to top</a>)</p>
 
 ## Libraries and Dependencies
 
@@ -56,7 +55,6 @@ The system consists of the following components:
 ```sh
 AZURE_STORAGE_CONNECTION_STRING="YourAzureStorageConnectionString"
 ```
-<p align="right">(<a href="#top">back to top</a>)</p>
 
 ## Usage Instructions
 
