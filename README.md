@@ -49,7 +49,6 @@ The system consists of the following components:
   pip install flask requests opencv-python numpy azure-storage-blob azure-storage-queue
   ```
 
-<p align="right">(<a href="#top">back to top</a>)</p>
 
 ## Environment Variables
 ```sh
