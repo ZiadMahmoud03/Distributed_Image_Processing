@@ -31,8 +31,6 @@ The system consists of the following components:
   <li>Worker: Processes images according to the specified operations and uploads the results to Azure Blob Storage.</li>
 </ol>
 
-<a href="https://drive.google.com/drive/folders/1XeuYIAMhx1omu4jxlUMmWX6BUMGJtcLN?usp=sharing">In this drive you'll find the diagrams related to the systems architecture</a>
-
 
 ## Features
 <ul>
